@@ -244,7 +244,7 @@ async def get_ai_recs(dfm: pd.DataFrame, callouts: Dict[str, Any]) -> Optional[s
             import anthropic
             client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
             resp = client.messages.create(
-                model=os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest"),
+                model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"),
                 max_tokens=350,
                 messages=[{"role": "user", "content": prompt}],
             )
