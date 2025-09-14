@@ -29,7 +29,7 @@ class AnalyzeResponse(BaseModel):
     seasonality: List[Dict[str, Any]]
     kpis: Dict[str, Any]
     callouts: Dict[str, Any]
-    ai_recommendations: Optional[str] = None
+    recs: Optional[str] = None
 
 
 # ---------- Helpers ----------
@@ -275,7 +275,7 @@ async def analyze(file: UploadFile = File(...), threshold: float = Form(0.0)):
         seasonality=seas.to_dict(orient="records"),
         kpis=kpis,
         callouts=callouts,
-        ai_recommendations=ai_md,
+        recs=ai_md,
     )
 @app.get("/")
 def root():
