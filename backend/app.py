@@ -179,12 +179,18 @@ async def get_ai_recs(dfm: pd.DataFrame, callouts: Dict[str, Any]) -> Optional[s
     Requires OPENAI_API_KEY in your environment (.env).
     Returns a Markdown string with actionable recs, or None if disabled.
     """
-    if not OPENAI_API_KEY:
+
+    MODEL_PROVIDER = os.getenv("MODEL_PROVIDER", "openai").lower()
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+
+    # No keys at all → fallback
+    if MODEL_PROVIDER == "openai" and not OPENAI_API_KEY:
+        return None
+    if MODEL_PROVIDER == "anthropic" and not ANTHROPIC_API_KEY:
         return None
 
     try:
-        from openai import OpenAI
-        client = OpenAI(api_key=OPENAI_API_KEY)
 
         # Build summary for AI prompt
         month_names = {
@@ -222,13 +228,30 @@ async def get_ai_recs(dfm: pd.DataFrame, callouts: Dict[str, Any]) -> Optional[s
         "or setting aside cash during good months."
         )
 
-        resp = client.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=350,
-        )
-        return resp.choices[0].message.content
+        # 🔹 Branch by provider
+        if MODEL_PROVIDER == "openai":
+            from openai import OpenAI
+            client = OpenAI(api_key=OPENAI_API_KEY)
+            resp = client.chat.completions.create(
+                model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=350,
+            )
+            return resp.choices[0].message.content
+
+        elif MODEL_PROVIDER == "anthropic":
+            import anthropic
+            client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+            resp = client.messages.create(
+                model=os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20240620"),
+                max_tokens=350,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return resp.content[0].text
+
+        else:
+            return None
 
     except Exception as e:
         print("AI error:", e)
