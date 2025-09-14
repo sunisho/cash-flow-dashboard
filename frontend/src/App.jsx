@@ -26,7 +26,6 @@ return (
 <div className="card" style={{gridColumn:'1 / -1'}}>
 <UploadForm onAnalyzed={setData} />
 </div>
-<KpiCards data={data} />
 </div>
 
 
@@ -54,6 +53,7 @@ return (
 </div>
 </div>
 <div className="grid grid-2" style={{marginTop:12}}>
+<KpiCards data={data} />
 <div className="card"><MonthlyChart monthly={data.monthly} /></div>
 <div className="card"><WeeklyChart weekly={data.weekly} thresholdLabel={data.threshold} /></div>
 </div>
