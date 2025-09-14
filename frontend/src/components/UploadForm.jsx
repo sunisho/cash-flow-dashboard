@@ -5,7 +5,9 @@ import axios from 'axios'
 export default function UploadForm({ onAnalyzed }){
 const [file, setFile] = useState(null)
 const [threshold, setThreshold] = useState(0)
-const [apiBase, setApiBase] = useState('http://127.0.0.1:8000')
+const [apiBase, setApiBase] = useState(
+	import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+	)
 const [loading, setLoading] = useState(false)
 const [error, setError] = useState('')
 
