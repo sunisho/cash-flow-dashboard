@@ -47,9 +47,9 @@ return (
 </div>
 <div className="card">
 <h3 style={{marginTop:0}}>AI‑Based Recommendations</h3>
-{!data.ai_recommendations && <div className="muted">Provide an OpenAI API key in the backend .env to enable richer recommendations. Rule-based flags still appear above.</div>}
-{data.ai_recommendations && (
-<div dangerouslySetInnerHTML={{__html: data.ai_recommendations.replace(/\n/g,'<br>')}} />
+{!data.recs && <div className="muted">Provide an OpenAI API key in the backend .env to enable richer recommendations. Rule-based flags still appear above.</div>}
+{data.recs && (
+<div dangerouslySetInnerHTML={{__html: data.recs.replace(/\n/g,'<br>')}} />
 )}
 </div>
 </div>
