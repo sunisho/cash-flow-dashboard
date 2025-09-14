@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cash Flow Insights Dashboard</title>
+  <!-- TailwindCSS CDN (for quick prototyping) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <!-- PapaParse for robust CSV parsing -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <style>
+    /* Mobile-friendly tweaks */
+    .card { @apply bg-white rounded-2xl shadow p-4 md:p-6; }
+    .badge { @apply inline-flex items-center px-2 py-1 rounded-full text-xs font-medium; }
+    .badge-good { @apply bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200; }
+    .badge-warn { @apply bg-amber-50 text-amber-700 ring-1 ring-amber-200; }
+    .badge-bad  { @apply bg-rose-50 text-rose-700 ring-1 ring-rose-200; }
+    .grid-auto { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+    canvas { max-height: 420px; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+  <header class="sticky top-0 z-10 backdrop-blur bg-white/75 border-b border-slate-200">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
+      <div class="h-9 w-9 rounded-xl bg-slate-900 text-white grid place-items-center font-bold">CF</div>
+      <div>
+        <h1 class="text-lg font-semibold">Cash Flow Insights Dashboard</h1>
+        <p class="text-xs text-slate-500">Upload weekly data → get monthly trends, runway risks & recommendations</p>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+    <!-- Inputs -->
+    <section class="card">
+      <h2 class="text-base md:text-lg font-semibold">1) Upload your CSV</h2>
+      <p class="text-sm text-slate-600 mt-1">Expected columns: <code>Date</code>, <code>Cash Inflows</code>, <code>Cash Outflows</code>, <code>Balance</code>. Rows are weekly.</p>
+      <div class="mt-3 grid gap-3 md:grid-cols-2">
+        <div>
+          <label class="block text-sm font-medium mb-1">Actuals CSV</label>
+          <input id="fileActual" type="file" accept=".csv" class="block w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-slate-900 file:text-white hover:file:bg-slate-800" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">(Optional) Projections CSV</label>
+          <input id="fileProj" type="file" accept=".csv" class="block w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-slate-700 file:text-white hover:file:bg-slate-600" />
+          <p class="text-xs text-slate-500 mt-1">If omitted, projections are derived from a 3‑month moving average of actuals.</p>
+        </div>
+      </div>
+
+      <div class="mt-4 grid gap-3 md:grid-cols-3">
+        <div>
+          <label class="block text-sm font-medium mb-1">Shortfall threshold ($)</label>
+          <input id="threshold" type="number" value="5000" class="w-full rounded-lg border-slate-300" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">Runway floor ($)</label>
+          <input id="runwayFloor" type="number" value="0" class="w-full rounded-lg border-slate-300" />
+        </div>
+        <div class="flex items-end">
+          <button id="btnProcess" class="w-full md:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 text-white px-4 py-2 font-medium hover:bg-slate-800">
+            Process Data
+          </button>
+        </div>
+      </div>
+
+      <details class="mt-3">
+        <summary class="text-sm font-medium cursor-pointer">CSV format help</summary>
+        <pre class="text-xs bg-slate-100 p-3 rounded-lg overflow-auto mt-2">Date,Cash Inflows,Cash Outflows,Balance
+2025-01-07,15000,12000,30000
+2025-01-14,14000,15000,29000
+2025-01-21,16000,13000,32000
+2025-01-28,17000,14000,35000
+...</pre>
+      </details>
+    </section>
+
+    <!-- KPI Row -->
+    <section class="grid grid-auto gap-4">
+      <div class="card" id="kpiNetChange">
+        <div class="text-xs text-slate-500">Latest Monthly Net Change</div>
+        <div class="mt-1 text-2xl font-semibold" data-value>-</div>
+        <div class="mt-1" data-badge></div>
+      </div>
+      <div class="card" id="kpiRunway">
+        <div class="text-xs text-slate-500">Projected Months of Runway</div>
+        <div class="mt-1 text-2xl font-semibold" data-value>-</div>
+        <div class="mt-1 text-xs text-slate-500">Based on avg monthly burn (last 3 months)</div>
+      </div>
+      <div class="card" id="kpiVariance">
+        <div class="text-xs text-slate-500">Latest Variance (Actual vs Projection)</div>
+        <div class="mt-1 text-2xl font-semibold" data-value>-</div>
+        <div class="mt-1" data-badge></div>
+      </div>
+    </section>
+
+    <!-- Charts -->
+    <section class="grid grid-auto gap-4">
+      <div class="card">
+        <div class="flex items-center justify-between">
+          <h3 class="font-semibold">Monthly Inflows vs Outflows (with Net)</h3>
+          <span class="badge badge-warn" id="netNegativeBadge" hidden>Negative months highlighted</span>
+        </div>
+        <canvas id="chartMonthly"></canvas>
+      </div>
+
+      <div class="card">
+        <h3 class="font-semibold">Weekly Balance Trend (Shortfalls Highlighted)</h3>
+        <canvas id="chartWeekly"></canvas>
+      </div>
+
+      <div class="card">
+        <h3 class="font-semibold">Projected vs Actual (Inflows & Outflows)</h3>
+        <canvas id="chartProj"></canvas>
+      </div>
+
+      <div class="card">
+        <h3 class="font-semibold">Seasonality: Monthly Averages by Calendar Month</h3>
+        <p class="text-xs text-slate-500 mb-2">Average inflows/outflows per calendar month (across all years).</p>
+        <canvas id="chartSeason"></canvas>
+      </div>
+    </section>
+
+    <!-- Insights & Recommendations -->
+    <section class="card">
+      <h3 class="font-semibold">Insights</h3>
+      <div id="insights" class="mt-3 space-y-2 text-sm"></div>
+    </section>
+
+    <section class="card">
+      <h3 class="font-semibold">Recommendations</h3>
+      <ul id="recs" class="mt-3 list-disc pl-5 text-sm space-y-2"></ul>
+    </section>
+  </main>
+
+  <script>
+    // --- Helpers ---
+    const fmtUSD = (n) => (n===null||isNaN(n))?'-':n.toLocaleString(undefined,{style:'currency',currency:'USD',maximumFractionDigits:0});
+    const ymKey = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const monthName = (i)=> new Date(2000,i,1).toLocaleString(undefined,{month:'short'});
+
+    // ⚠️ WARNING: hard-coding API keys is insecure. Do not use this in production.
+    // Anyone can open the browser dev tools and see your key.
+    const OPENAI_API_KEY = "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";
+
+    function parseNumber(x){
+      if (x===null || x===undefined) return 0;
+      if (typeof x === 'number') return x;
+      // remove commas and currency symbols
+      const v = String(x).replace(/[$,]/g,'').trim();
+      const n = Number(v);
+      return isNaN(n) ? 0 : n;
+    }
+
+    function groupMonthly(rows){
+      const byYM = new Map();
+      for (const r of rows){
+        const d = new Date(r.Date);
+        if (isNaN(d)) continue;
+        const key = ymKey(d);
+        if (!byYM.has(key)) byYM.set(key,{inflows:0,outflows:0,lastBalance:null, weeks:[]});
+        const obj = byYM.get(key);
+        obj.inflows += r.Inflows;
+        obj.outflows += r.Outflows;
+        obj.lastBalance = r.Balance; // last row of the month will remain
+        obj.weeks.push(r);
+      }
+      // sort by key chronological
+      const entries = [...byYM.entries()].sort((a,b)=> new Date(a[0]+'-01') - new Date(b[0]+'-01'));
+      return entries.map(([key,val])=>({
+        ym: key,
+        year: Number(key.split('-')[0]),
+        month: Number(key.split('-')[1]),
+        inflows: val.inflows,
+        outflows: val.outflows,
+        net: val.inflows - val.outflows,
+        endBalance: val.lastBalance,
+        weeks: val.weeks
+      }));
+    }
+
+    function movingAverage(arr, window=3){
+      const res = [];
+      for (let i=0;i<arr.length;i++){
+        const start = Math.max(0,i-window);
+        const slice = arr.slice(start,i);
+        const avg = slice.length ? slice.reduce((a,b)=>a+b,0)/slice.length : null;
+        res.push(avg);
+      }
+      return res;
+    }
+
+    function deriveProjections(months){
+      // Simple model: 3-month moving average for inflows & outflows
+      const infl = months.map(m=>m.inflows);
+      const out = months.map(m=>m.outflows);
+      const inflMA = movingAverage(infl,3);
+      const outMA = movingAverage(out,3);
+      return months.map((m,i)=>({ym:m.ym, inflowProj: inflMA[i] ?? infl[i], outflowProj: outMA[i] ?? out[i]}));
+    }
+
+    function seasonality(months){
+      // Average by calendar month (1-12)
+      const acc = Array.from({length:12},()=>({in:0,out:0,n:0}));
+      months.forEach(m=>{ const idx=m.month-1; acc[idx].in+=m.inflows; acc[idx].out+=m.outflows; acc[idx].n++; });
+      return acc.map((o,i)=>({month:i+1, inflows: o.n?o.in/o.n:0, outflows:o.n?o.out/o.n:0}));
+    }
+
+    function estimateRunway(weeklyRows, months, floor){
+      // Use last balance, and avg monthly net (last 3 months). If positive net, runway = Infinity
+      const lastBalance = weeklyRows.length ? weeklyRows[weeklyRows.length-1].Balance : 0;
+      const last3 = months.slice(-3);
+      const avgNet = last3.length ? last3.reduce((a,m)=>a+m.net,0)/last3.length : 0;
+      if (avgNet >= 0) return {months: Infinity, lastBalance, avgNet};
+      const monthsToFloor = (lastBalance - floor)/Math.abs(avgNet);
+      return {months: Math.max(0, monthsToFloor), lastBalance, avgNet};
+    }
+
+    function generateInsights(months, weeklyRows, proj, threshold){
+      const insights = [];
+      if (!months.length) return insights;
+
+      // Latest month net
+      const latest = months[months.length-1];
+      insights.push({type: latest.net>=0?'good':'bad', text: `${latest.ym}: Net ${latest.net>=0?'surplus':'deficit'} of ${fmtUSD(Math.abs(latest.net))}.`});
+
+      // Variance vs projection (latest)
+      if (proj && proj.length){
+        const p = proj[proj.length-1];
+        if (p){
+          const inflVar = latest.inflows - (p.inflowProj ?? 0);
+          const outVar = latest.outflows - (p.outflowProj ?? 0);
+          const varPct = (actual, est)=> est? ((actual-est)/est)*100 : null;
+          const inflVarPct = varPct(latest.inflows, p.inflowProj);
+          const outVarPct = varPct(latest.outflows, p.outflowProj);
+          if (inflVarPct!==null) insights.push({type: inflVar>=0?'good':'warn', text:`Inflows ${inflVar>=0?'above':'below'} projection by ${inflVarPct.toFixed(1)}%.`});
+          if (outVarPct!==null) insights.push({type: outVar<=0?'good':'bad', text:`Outflows ${outVar<=0?'below':'above'} projection by ${Math.abs(outVarPct).toFixed(1)}%.`});
+        }
+      }
+
+      // Shortfall weeks
+      const shortWeeks = weeklyRows.filter(r=> r.Balance < threshold);
+      if (shortWeeks.length){
+        const first = shortWeeks[0];
+        insights.push({type:'bad', text:`${shortWeeks.length} week(s) below threshold ${fmtUSD(threshold)}. First: ${new Date(first.Date).toLocaleDateString()}.`});
+      } else {
+        insights.push({type:'good', text:`No weekly balances fell below the ${fmtUSD(threshold)} threshold.`});
+      }
+
+      // Seasonality finding: compare each month to its calendar-average
+      const season = seasonality(months);
+      const anomalies = [];
+      months.forEach(m=>{
+        const avg = season[m.month-1];
+        const inflDev = avg.inflows ? (m.inflows-avg.inflows)/avg.inflows*100 : 0;
+        const outDev = avg.outflows ? (m.outflows-avg.outflows)/avg.outflows*100 : 0;
+        if (Math.abs(inflDev)>=20) anomalies.push(`${m.ym}: inflows ${inflDev>0?'↑':'↓'} ${Math.abs(inflDev).toFixed(0)}% vs seasonal avg`);
+        if (Math.abs(outDev)>=20) anomalies.push(`${m.ym}: outflows ${outDev>0?'↑':'↓'} ${Math.abs(outDev).toFixed(0)}% vs seasonal avg`);
+      });
+      if (anomalies.length){ insights.push({type:'warn', text:`Seasonality signals: ${anomalies.slice(-3).join('; ')}.`}); }
+
+      // Risk months (runway at risk): endBalance near/under threshold or net negative 2+ months streak
+      const risk = months.filter(m=> m.endBalance < threshold || m.net < 0);
+      if (risk.length){
+        const lastRisk = risk.slice(-3).map(r=>r.ym).join(', ');
+        insights.push({type:'warn', text:`Runway risk months detected: ${lastRisk}. Investigate drivers.`});
+      }
+
+      return insights;
+    }
+
+    async function generateLLMRecommendations(months, weeklyRows, threshold) {
+  if (!OPENAI_API_KEY) return null;
+
+  const latest = months[months.length - 1];
+  const runway = estimateRunway(weeklyRows, months, threshold);
+
+  const prompt = `
+  You are a seasoned financial advisor for small businesses.
+  Here are the latest metrics:
+  - Latest month (${latest.ym}) net change: ${fmtUSD(latest.net)}
+  - Last balance: ${fmtUSD(latest.endBalance)}
+  - Avg inflows (last 3 mo): ${fmtUSD(months.slice(-3).reduce((a,m)=>a+m.inflows,0)/3)}
+  - Avg outflows (last 3 mo): ${fmtUSD(months.slice(-3).reduce((a,m)=>a+m.outflows,0)/3)}
+  - Runway (months until floor): ${runway.months===Infinity ? "infinite" : runway.months.toFixed(1)}
+  - Weekly shortfall threshold: ${fmtUSD(threshold)}
+
+  Please provide 3–5 actionable, narrative recommendations in plain English
+  that would build trust with a small business owner. Keep them concise, specific, and practical.
+  `;
+
+  try {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",   // or "gpt-4o" if you want longer outputs
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 300
+      })
+    });
+
+    if (!res.ok) {
+      console.error("OpenAI API error:", await res.text());
+      return null;
+    }
+
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content || null;
+  } catch (err) {
+    console.error("LLM fetch failed:", err);
+    return null;
+  }
+}
+
+    // --- Charts ---
+    let chartMonthly, chartWeekly, chartProj, chartSeason;
+    function upsertChart(ctx, cfg){
+      if (!ctx) return null;
+      if (ctx._chart){ ctx._chart.destroy(); }
+      ctx._chart = new Chart(ctx, cfg);
+      return ctx._chart;
+    }
+
+    // --- Main processing ---
+    async function readCSV(file){
+      return new Promise((resolve,reject)=>{
+        Papa.parse(file,{
+          header:true,
+          skipEmptyLines:true,
+          transformHeader: h=> h.trim(),
+          complete: (res)=> resolve(res.data),
+          error: (err)=> reject(err)
+        });
+      });
+    }
+
+    function normalizeRows(rows){
+      const clean = [];
+      for (const r of rows){
+        const DateStr = (r.Date ?? r.date ?? '').trim();
+        const d = new Date(DateStr);
+        if (isNaN(d)) continue;
+        clean.push({
+          Date: d,
+          Inflows: parseNumber(r['Cash Inflows'] ?? r.Inflows ?? r['Inflows'] ?? r['cash_inflows']),
+          Outflows: parseNumber(r['Cash Outflows'] ?? r.Outflows ?? r['Outflows'] ?? r['cash_outflows']),
+          Balance: parseNumber(r['Balance'] ?? r.balance)
+        });
+      }
+      // sort by date
+      clean.sort((a,b)=> a.Date - b.Date);
+      return clean;
+    }
+
+    function buildProjectedFromCSV(rows){
+      // Accept columns: Date, Projected Inflows, Projected Outflows (or similar)
+      const map = new Map();
+      for (const r of rows){
+        const d = new Date(r.Date ?? r.date ?? r['Week'] ?? r['Period']);
+        if (isNaN(d)) continue;
+        const ym = ymKey(d);
+        const pIn = parseNumber(r['Projected Inflows'] ?? r['Inflows'] ?? r['Cash Inflows'] ?? r['Projected_Inflows']);
+        const pOut = parseNumber(r['Projected Outflows'] ?? r['Outflows'] ?? r['Cash Outflows'] ?? r['Projected_Outflows']);
+        if (!map.has(ym)) map.set(ym,{in:0,out:0});
+        const o = map.get(ym); o.in += pIn; o.out += pOut;
+      }
+      return map; // ym -> {in, out}
+    }
+
+    document.getElementById('btnProcess').addEventListener('click', async ()=>{
+      const fileA = document.getElementById('fileActual').files[0];
+      if (!fileA){ alert('Please upload the Actuals CSV first.'); return; }
+      const fileP = document.getElementById('fileProj').files[0];
+      const threshold = Number(document.getElementById('threshold').value || 0);
+      const runwayFloor = Number(document.getElementById('runwayFloor').value || 0);
+
+      const rawA = await readCSV(fileA);
+      const weekly = normalizeRows(rawA);
+      if (!weekly.length){ alert('No valid rows parsed from Actuals.'); return; }
+      const months = groupMonthly(weekly);
+
+      // Projections
+      let projArr = deriveProjections(months);
+      if (fileP){
+        const rawP = await readCSV(fileP);
+        const map = buildProjectedFromCSV(rawP);
+        projArr = months.map(m=>{
+          const v = map.get(m.ym);
+          return { ym:m.ym, inflowProj: v? v.in : (projArr.find(p=>p.ym===m.ym)?.inflowProj ?? null), outflowProj: v? v.out : (projArr.find(p=>p.ym===m.ym)?.outflowProj ?? null) };
+        });
+      }
+
+      // KPIs
+      const runway = estimateRunway(weekly, months, runwayFloor);
+      const kpiRunway = document.querySelector('#kpiRunway [data-value]');
+      kpiRunway.textContent = runway.months===Infinity ? '∞' : runway.months.toFixed(1);
+
+      const latest = months[months.length-1];
+      const kpiNet = document.querySelector('#kpiNetChange [data-value]');
+      kpiNet.textContent = fmtUSD(latest.net);
+      const kpiNetBadge = document.querySelector('#kpiNetChange [data-badge]');
+      kpiNetBadge.innerHTML = `<span class="badge ${latest.net>=0?'badge-good':'badge-bad'}">${latest.net>=0?'Healthy':'Concerning'}</span>`;
+
+      const latestProj = projArr[projArr.length-1] || {};
+      const latestVar = (latest.inflows - (latestProj.inflowProj ?? latest.inflows)) - (latest.outflows - (latestProj.outflowProj ?? latest.outflows));
+      const kpiVar = document.querySelector('#kpiVariance [data-value]');
+      kpiVar.textContent = (isFinite(latestVar)? (latestVar>=0?'+':'')+fmtUSD(latestVar) : '-');
+      const kpiVarBadge = document.querySelector('#kpiVariance [data-badge]');
+      kpiVarBadge.innerHTML = `<span class="badge ${latestVar>=0?'badge-good':'badge-warn'}">${latestVar>=0?'Better than projected':'Worse than projected'}</span>`;
+
+      // Charts: Monthly In vs Out
+      const labelsM = months.map(m=> `${m.ym}`);
+      const monthlyCfg = {
+        type:'bar',
+        data:{
+          labels: labelsM,
+          datasets:[
+            {label:'Inflows', data: months.map(m=>m.inflows), backgroundColor:'rgba(16,185,129,0.4)', borderColor:'rgb(16,185,129)', borderWidth:1},
+            {label:'Outflows', data: months.map(m=>m.outflows), backgroundColor:'rgba(244,63,94,0.35)', borderColor:'rgb(244,63,94)', borderWidth:1},
+            {label:'Net', type:'line', data: months.map(m=>m.net), borderColor:'rgb(30,64,175)', tension:0.25, yAxisID:'y'}
+          ]
+        },
+        options:{
+          responsive:true,
+          maintainAspectRatio:false,
+          interaction:{mode:'index', intersect:false},
+          scales:{ y:{ beginAtZero:true, ticks:{ callback:(v)=> v.toLocaleString() } }},
+          plugins:{ legend:{ position:'bottom' } }
+        }
+      };
+      upsertChart(document.getElementById('chartMonthly'), monthlyCfg);
+      document.getElementById('netNegativeBadge').hidden = months.some(m=> m.net<0) ? false : true;
+
+      // Chart: Weekly Balance
+      const weeklyCfg = {
+        type:'line',
+        data:{
+          labels: weekly.map(w=> w.Date.toISOString().slice(0,10)),
+          datasets:[{
+            label:'Balance', data: weekly.map(w=>w.Balance), borderColor:'rgb(30,64,175)', pointRadius:2, tension:0.25,
+            segment:{ borderColor: ctx=> (ctx.p1.parsed.y < threshold ? 'rgb(244,63,94)' : 'rgb(30,64,175)') },
+            pointBackgroundColor: ctx=> (ctx.parsed.y < threshold ? 'rgb(244,63,94)' : 'rgb(30,64,175)')
+          }]
+        },
+        options:{ responsive:true, maintainAspectRatio:false, scales:{ y:{ ticks:{ callback:(v)=> v.toLocaleString() } } }, plugins:{ legend:{ position:'bottom' } } }
+      };
+      upsertChart(document.getElementById('chartWeekly'), weeklyCfg);
+
+      // Chart: Proj vs Actual (stacked bars per month)
+      const projCfg = {
+        type:'bar',
+        data:{
+          labels: labelsM,
+          datasets:[
+            {label:'Actual Inflows', data: months.map(m=>m.inflows), backgroundColor:'rgba(16,185,129,0.5)'},
+            {label:'Projected Inflows', data: projArr.map(p=>p.inflowProj ?? null), backgroundColor:'rgba(16,185,129,0.2)'},
+            {label:'Actual Outflows', data: months.map(m=>m.outflows), backgroundColor:'rgba(244,63,94,0.5)'},
+            {label:'Projected Outflows', data: projArr.map(p=>p.outflowProj ?? null), backgroundColor:'rgba(244,63,94,0.2)'}
+          ]
+        },
+        options:{ responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false}, plugins:{ legend:{ position:'bottom' } }, scales:{ y:{ ticks:{ callback:(v)=> v.toLocaleString() } } } }
+      };
+      upsertChart(document.getElementById('chartProj'), projCfg);
+
+      // Chart: Seasonality (avg by calendar month)
+      const seas = seasonality(months);
+      const seasonCfg = {
+        type:'line',
+        data:{
+          labels: seas.map(s=> monthName(s.month-1)),
+          datasets:[
+            {label:'Avg Inflows', data: seas.map(s=>s.inflows), borderColor:'rgb(16,185,129)', tension:0.25},
+            {label:'Avg Outflows', data: seas.map(s=>s.outflows), borderColor:'rgb(244,63,94)', tension:0.25}
+          ]
+        },
+        options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom' } }, scales:{ y:{ ticks:{ callback:(v)=> v.toLocaleString() } } } }
+      };
+      upsertChart(document.getElementById('chartSeason'), seasonCfg);
+
+      // Insights
+      const insights = generateInsights(months, weekly, projArr, threshold);
+      const $ins = document.getElementById('insights');
+      $ins.innerHTML = '';
+      insights.forEach(i=>{
+        const badgeClass = i.type==='good'?'badge-good': i.type==='bad'?'badge-bad':'badge-warn';
+        const el = document.createElement('div');
+        el.innerHTML = `<span class="badge ${badgeClass} mr-2">${i.type.toUpperCase()}</span>${i.text}`;
+        $ins.appendChild(el);
+      });
+
+      // LLM recommendations
+      const llmRecs = await generateLLMRecommendations(months, weekly, threshold);
+      if (llmRecs) {
+        const li = document.createElement('li');
+        li.innerHTML = `<strong>AI Advisor:</strong><br>${llmRecs.replace(/\\n/g, '<br>')}`;
+        $recs.appendChild(li);
+      }
+    });
+  </script>
+</body>
+</html>
