@@ -33,6 +33,14 @@ return (
 <>
 <div className="grid grid-2" style={{marginTop:12}}>
 <div className="card">
+<h3 style={{marginTop:0}}>AI‑Based Recommendations</h3>
+{!data.recs && <div className="muted">Provide an OpenAI API key in the backend .env to enable richer recommendations. Rule-based flags still appear above.</div>}
+{data.recs && (
+<div dangerouslySetInnerHTML={{__html: data.recs.replace(/\n/g,'<br>')}} />
+)}
+</div>
+</div>
+<div className="card">
 <h3 style={{marginTop:0}}>Callouts</h3>
 {!data?.callouts && <div className="muted">None.</div>}
 {data?.callouts && (
@@ -43,14 +51,6 @@ return (
 <div style={{marginTop:6}}><strong>Weeks with negative net change: </strong> {data.callouts.weekly_breaches?.length || 0} weeks</div>
 </div>
 )}
-</div>
-<div className="card">
-<h3 style={{marginTop:0}}>AI‑Based Recommendations</h3>
-{!data.recs && <div className="muted">Provide an OpenAI API key in the backend .env to enable richer recommendations. Rule-based flags still appear above.</div>}
-{data.recs && (
-<div dangerouslySetInnerHTML={{__html: data.recs.replace(/\n/g,'<br>')}} />
-)}
-</div>
 </div>
 <div className="grid grid-2" style={{marginTop:12}}>
 <KpiCards data={data} />

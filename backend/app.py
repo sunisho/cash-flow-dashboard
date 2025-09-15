@@ -7,6 +7,7 @@ import pandas as pd
 from io import StringIO
 import os
 from dotenv import load_dotenv
+from datetime import datetime
 
 # Load environment (.env file)
 load_dotenv()
@@ -193,11 +194,20 @@ async def get_ai_recs(dfm: pd.DataFrame, callouts: Dict[str, Any]) -> Optional[s
     try:
 
         # Build summary for AI prompt
+
+        current_month_num = datetime.now().month
+        next_month_num = (current_month_num % 12) + 1
+
         month_names = {
             1: "January", 2: "February", 3: "March", 4: "April",
             5: "May", 6: "June", 7: "July", 8: "August",
             9: "September", 10: "October", 11: "November", 12: "December"
         }
+
+        current_month_name = month_names[current_month_num]
+        next_month_name = month_names[next_month_num]
+
+
         rows = []
         for _, r in dfm.iterrows():
             rows.append(
@@ -215,17 +225,20 @@ async def get_ai_recs(dfm: pd.DataFrame, callouts: Dict[str, Any]) -> Optional[s
              for x in callouts.get("risk_months", [])]
         ) or "none"
 
+
+
         prompt = (
         "You are a helpful financial coach for small business owners. "
-        "Write advice in plain, everyday language — no technical or business jargon. "
-        "Always explain things as if the person is new to managing cash. "
-        "Talk about each month as 'next January', 'next June', etc. (do not mention the year explicitly).\n\n"
+        "Write advice in plain, everyday language — no technical or business jargon.\n\n"
         f"Here is the monthly summary:\n{monthly_summary}\n\n"
         f"Risk months: {risk_lines}.\n\n"
-        "Now write 3–6 short, clear, and encouraging tips. "
-        "Each tip should say the month it applies to (e.g., 'In next June...'). "
-        "Focus on simple ideas like saving money, being careful with spending, "
-        "or setting aside cash during good months."
+        f"Current month: {current_month_name}. Next month: {next_month_name}.\n\n"
+        "Write your response in two sections:\n\n"
+        "1. **TL;DR (Overall Game Plan)** — Give 1–3 of the most important things to do "
+        "right now, based on the overall dataset, the current month, and the next month. "
+        "Highlight any seasonal risks (e.g., if last year November was tough, tell them to start preparing now).\n\n"
+        "2. **Month-by-Month Tips** — Give 3–6 short, clear, encouraging tips for individual months. "
+        "Each tip should start with the month it applies to (e.g., 'In next June...')."
         )
 
         # 🔹 Branch by provider
